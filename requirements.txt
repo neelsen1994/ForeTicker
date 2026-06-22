@@ -1,0 +1,33 @@
+# Data ingestion
+yfinance
+newsapi-python
+feedparser
+trafilatura
+
+# NLP
+transformers
+torch
+torchvision
+
+# Forecasting
+pytorch-forecasting
+pytorch-lightning
+
+# Feature engineering
+ta
+pandas
+pyarrow
+
+# Utilities
+scikit-learn
+python-dotenv
+requests
+tqdm
+schedule
+
+# Experiment tracking
+mlflow
+
+# API serving
+fastapi
+uvicorn

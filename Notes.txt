@@ -1,0 +1,7 @@
+PHASE 1:
+
+cp .env.example .env  # fill in NEWS_API_KEY
+pip install -r requirements.txt
+python -c "from ingestion.price_fetcher import fetch_all; fetch_all()"
+python -c "from ingestion.news_collector import collect_all; from config import DEFAULT_TICKERS, DEFAULT_START, DEFAULT_END; collect_all(DEFAULT_TICKERS, DEFAULT_START, DEFAULT_END)"
+python ingestion/article_scraper.py
