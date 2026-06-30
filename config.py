@@ -25,7 +25,7 @@ PROCESSED_SENTIMENTS_DIR: Path = DATA_DIR / "processed" / "sentiments"
 META_DIR: Path = DATA_DIR / "meta"
 ARTICLES_META_FILE: Path = META_DIR / "articles_meta.json"
 
-MLFLOW_TRACKING_URI: str = os.getenv("MLFLOW_TRACKING_URI", "./mlruns")
+MLFLOW_TRACKING_URI: str = os.getenv("MLFLOW_TRACKING_URI", "sqlite:///mlflow.db")
 
 # Default tickers and date range
 DEFAULT_TICKERS: list[str] = ["AAPL", "MSFT", "NVDA", "SAP.DE"]

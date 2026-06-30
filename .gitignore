@@ -29,6 +29,7 @@ build/
 # ML experiment tracking
 mlruns/
 mlartifacts/
+mlflow.db
 
 # Model checkpoints & weights
 *.ckpt
@@ -37,6 +38,9 @@ mlartifacts/
 *.bin
 *.safetensors
 lightning_logs/
+
+# Logs
+*.log
 
 # OS
 .DS_Store
