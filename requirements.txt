@@ -29,5 +29,9 @@ schedule
 mlflow
 
 # API serving
-fastapi
+fastapi>=0.110
 uvicorn
+
+# Dashboard
+streamlit
+plotly
