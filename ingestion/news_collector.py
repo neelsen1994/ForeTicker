@@ -21,12 +21,15 @@ from typing import Optional
 
 from config import (
     NEWS_API_KEY,
+    ALPHA_VANTAGE_KEY,
     META_DIR,
     ARTICLES_META_FILE,
     RSS_FEEDS,
     GDELT_QUERIES,
     MARKET_CLOSE_HOUR_ET,
 )
+
+AV_NEWS_API = "https://www.alphavantage.co/query"
 
 try:
     from newsapi import NewsApiClient
@@ -209,6 +212,27 @@ def _gdelt_windows(from_date: str, to_date: str, window_days: int = 14):
         cursor = window_end
 
 
+def _gdelt_request(params: dict, delay_seconds: float, max_retries: int = 5) -> dict:
+    """GET GDELT with exponential backoff on 429 / empty-body throttling."""
+    backoff = delay_seconds
+    for attempt in range(max_retries):
+        try:
+            resp = requests.get(GDELT_API, params=params, timeout=30)
+            if resp.status_code == 429 or not resp.text.strip():
+                # GDELT throttles with 429 OR with 200 + empty body
+                wait = backoff * (2 ** attempt)
+                print(f"[news_collector] GDELT rate-limited — waiting {wait:.0f}s")
+                time.sleep(wait)
+                continue
+            resp.raise_for_status()
+            return resp.json()
+        except (requests.RequestException, ValueError) as e:
+            wait = backoff * (2 ** attempt)
+            print(f"[news_collector] GDELT request error (attempt {attempt+1}): {e} — retrying in {wait:.0f}s")
+            time.sleep(wait)
+    return {}
+
+
 def collect_gdelt(
     ticker: str,
     query: str,
@@ -216,12 +240,13 @@ def collect_gdelt(
     to_date: str,
     max_records: int = 250,
     window_days: int = 14,
-    delay_seconds: float = 2.0,
+    delay_seconds: float = 6.0,
 ) -> list[dict]:
     """
     Fetch article metadata from GDELT Doc API v2.
     Free, no key needed, covers years of history.
     Paginates by sliding date windows since each request caps at 250 results.
+    Uses exponential backoff on rate-limit (429) responses.
     """
     records: list[dict] = []
     windows = list(_gdelt_windows(from_date, to_date, window_days))
@@ -238,12 +263,9 @@ def collect_gdelt(
             "format": "json",
         }
 
-        try:
-            resp = requests.get(GDELT_API, params=params, timeout=30)
-            resp.raise_for_status()
-            data = resp.json()
-        except Exception as e:
-            print(f"[news_collector] GDELT error (window {i+1}/{total_windows}): {e}")
+        data = _gdelt_request(params, delay_seconds)
+        if not data:
+            print(f"[news_collector] GDELT {ticker} window {i+1}/{total_windows}: no data, skipping")
             time.sleep(delay_seconds)
             continue
 
@@ -290,6 +312,94 @@ def collect_gdelt(
 
 
 # ---------------------------------------------------------------------------
+# Alpha Vantage News Sentiment
+# ---------------------------------------------------------------------------
+
+def collect_alphavantage(
+    ticker: str,
+    from_date: str,
+    to_date: str,
+    limit: int = 1000,
+) -> list[dict]:
+    """
+    Fetch historical news from Alpha Vantage NEWS_SENTIMENT endpoint.
+    Free tier: 25 req/day — each returns up to 1000 articles.
+    Splits the date range into yearly chunks to maximise coverage.
+    """
+    if not ALPHA_VANTAGE_KEY:
+        print("[news_collector] ALPHA_VANTAGE_KEY not set — skipping Alpha Vantage")
+        return []
+
+    # AV format: YYYYMMDDTHHMM
+    def _av_fmt(date_str: str, end_of_day: bool = False) -> str:
+        d = datetime.strptime(date_str, "%Y-%m-%d")
+        return d.strftime("%Y%m%dT2359") if end_of_day else d.strftime("%Y%m%dT0000")
+
+    # Chunk into yearly windows to get better coverage per request
+    start = datetime.strptime(from_date, "%Y-%m-%d")
+    end   = datetime.strptime(to_date,   "%Y-%m-%d")
+    windows: list[tuple[str, str]] = []
+    cursor = start
+    while cursor < end:
+        year_end = min(datetime(cursor.year, 12, 31), end)
+        windows.append((cursor.strftime("%Y-%m-%d"), year_end.strftime("%Y-%m-%d")))
+        cursor = datetime(cursor.year + 1, 1, 1)
+
+    records: list[dict] = []
+    for win_start, win_end in windows:
+        params = {
+            "function": "NEWS_SENTIMENT",
+            "tickers": ticker.replace(".DE", ""),  # AV uses US-style symbols
+            "time_from": _av_fmt(win_start),
+            "time_to": _av_fmt(win_end, end_of_day=True),
+            "limit": limit,
+            "sort": "EARLIEST",
+            "apikey": ALPHA_VANTAGE_KEY,
+        }
+        try:
+            resp = requests.get(AV_NEWS_API, params=params, timeout=30)
+            resp.raise_for_status()
+            data = resp.json()
+        except Exception as e:
+            print(f"[news_collector] Alpha Vantage error ({win_start}→{win_end}): {e}")
+            continue
+
+        if "Information" in data:
+            print(f"[news_collector] Alpha Vantage rate limit hit: {data['Information']}")
+            break
+
+        feed = data.get("feed", [])
+        for art in feed:
+            pub_raw = art.get("time_published", "")  # format: 20220103T120000
+            try:
+                pub_dt = datetime.strptime(pub_raw, "%Y%m%dT%H%M%S").replace(tzinfo=timezone.utc)
+                trading_date = _align_to_trading_day(pub_dt)
+            except ValueError:
+                trading_date = pub_raw[:4] + "-" + pub_raw[4:6] + "-" + pub_raw[6:8]
+
+            url = art.get("url", "")
+            if not url:
+                continue
+
+            records.append({
+                "url": url,
+                "ticker": ticker,
+                "date": trading_date,
+                "published_at": pub_raw,
+                "source": art.get("source", "alphavantage"),
+                "title": art.get("title", ""),
+                "scrape_status": "pending",
+                "file": None,
+            })
+
+        print(f"[news_collector] Alpha Vantage {ticker} {win_start}→{win_end}: {len(feed)} articles")
+        time.sleep(12)  # free tier: 5 req/min → 12s between calls
+
+    print(f"[news_collector] Alpha Vantage total: {len(records)} articles for {ticker}")
+    return records
+
+
+# ---------------------------------------------------------------------------
 # Orchestrator
 # ---------------------------------------------------------------------------
 
@@ -299,13 +409,15 @@ def collect_all(
     to_date: str,
     newsapi_queries: Optional[dict[str, str]] = None,
     gdelt_queries: Optional[dict[str, str]] = None,
+    use_alphavantage: bool = True,
     use_gdelt: bool = True,
     use_rss: bool = True,
     use_newsapi: bool = True,
 ) -> list[dict]:
     """
-    Collect metadata from GDELT + RSS + NewsAPI for each ticker.
+    Collect metadata from Alpha Vantage + GDELT + RSS + NewsAPI for each ticker.
     Merges with any existing records in articles_meta.json (deduped by URL).
+    Priority: Alpha Vantage (best historical) → GDELT → RSS → NewsAPI.
     """
     if newsapi_queries is None:
         newsapi_queries = {t: t for t in tickers}
@@ -316,6 +428,8 @@ def collect_all(
     new_records: list[dict] = []
 
     for ticker in tickers:
+        if use_alphavantage:
+            new_records += collect_alphavantage(ticker, from_date, to_date)
         if use_gdelt:
             query = gdelt_queries.get(ticker, ticker)
             new_records += collect_gdelt(ticker, query, from_date, to_date)
@@ -334,4 +448,6 @@ def collect_all(
 if __name__ == "__main__":
     from config import DEFAULT_TICKERS, DEFAULT_START, DEFAULT_END
 
-    collect_all(DEFAULT_TICKERS, DEFAULT_START, DEFAULT_END)
+    # GDELT is disabled — blocked after excessive requests.
+    # Alpha Vantage alone gives 1000+ articles/ticker/year.
+    collect_all(DEFAULT_TICKERS, DEFAULT_START, DEFAULT_END, use_gdelt=False)

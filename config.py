@@ -1,5 +1,6 @@
 from pathlib import Path
 from dotenv import load_dotenv
+from datetime import datetime
 import os
 
 load_dotenv()
@@ -29,7 +30,7 @@ MLFLOW_TRACKING_URI: str = os.getenv("MLFLOW_TRACKING_URI", "./mlruns")
 # Default tickers and date range
 DEFAULT_TICKERS: list[str] = ["AAPL", "MSFT", "NVDA", "SAP.DE"]
 DEFAULT_START: str = "2022-01-01"
-DEFAULT_END: str = "2024-12-31"
+DEFAULT_END: str = datetime.today().strftime("%Y-%m-%d")
 
 # Market close hour in ET (24h) — articles after this hour go to next trading day
 MARKET_CLOSE_HOUR_ET: int = 16

@@ -1,0 +1,23 @@
+nohup: ignoring input
+[news_collector] Alpha Vantage AAPL 2022-01-01→2022-12-31: 827 articles
+[news_collector] Alpha Vantage rate limit hit: We have detected your API key as your_alphavantage_key and our standard API rate limit is 25 requests per day. Please subscribe to any of the premium plans at https://www.alphavantage.co/premium/ to instantly remove all daily rate limits.
+[news_collector] Alpha Vantage total: 827 articles for AAPL
+[news_collector] RSS: 20 articles for AAPL
+[news_collector] NewsAPI error (page 1): {'status': 'error', 'code': 'parameterInvalid', 'message': 'You are trying to request results too far in the past. Your plan permits you to request articles as far back as 2026-05-22, but you have requested 2022-01-01. You may need to upgrade to a paid plan.'}
+[news_collector] NewsAPI: 0 articles for AAPL
+[news_collector] Alpha Vantage rate limit hit: Thank you for using Alpha Vantage! Please consider spreading out your free API requests more sparingly (1 request per second). You may subscribe to any of the premium plans at https://www.alphavantage.co/premium/ to lift the free key rate limit (25 requests per day), raise the per-second burst limit, and instantly unlock all premium endpoints
+[news_collector] Alpha Vantage total: 0 articles for MSFT
+[news_collector] RSS: 20 articles for MSFT
+[news_collector] NewsAPI error (page 1): {'status': 'error', 'code': 'parameterInvalid', 'message': 'You are trying to request results too far in the past. Your plan permits you to request articles as far back as 2026-05-22, but you have requested 2022-01-01. You may need to upgrade to a paid plan.'}
+[news_collector] NewsAPI: 0 articles for MSFT
+[news_collector] Alpha Vantage rate limit hit: We have detected your API key as your_alphavantage_key and our standard API rate limit is 25 requests per day. Please subscribe to any of the premium plans at https://www.alphavantage.co/premium/ to instantly remove all daily rate limits.
+[news_collector] Alpha Vantage total: 0 articles for NVDA
+[news_collector] RSS: 20 articles for NVDA
+[news_collector] NewsAPI error (page 1): {'status': 'error', 'code': 'parameterInvalid', 'message': 'You are trying to request results too far in the past. Your plan permits you to request articles as far back as 2026-05-22, but you have requested 2022-01-01. You may need to upgrade to a paid plan.'}
+[news_collector] NewsAPI: 0 articles for NVDA
+[news_collector] Alpha Vantage rate limit hit: Thank you for using Alpha Vantage! Please consider spreading out your free API requests more sparingly (1 request per second). You may subscribe to any of the premium plans at https://www.alphavantage.co/premium/ to lift the free key rate limit (25 requests per day), raise the per-second burst limit, and instantly unlock all premium endpoints
+[news_collector] Alpha Vantage total: 0 articles for SAP.DE
+[news_collector] RSS: 20 articles for SAP.DE
+[news_collector] NewsAPI error (page 1): {'status': 'error', 'code': 'parameterInvalid', 'message': 'You are trying to request results too far in the past. Your plan permits you to request articles as far back as 2026-05-22, but you have requested 2022-01-01. You may need to upgrade to a paid plan.'}
+[news_collector] NewsAPI: 0 articles for SAP.DE
+[news_collector] Total unique articles in meta: 6380
