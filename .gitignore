@@ -37,6 +37,7 @@ mlflow.db
 *.pth
 *.bin
 *.safetensors
+*.pkl
 lightning_logs/
 
 # Logs

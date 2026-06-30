@@ -67,7 +67,8 @@ def train_tft(
     max_epochs: int = 30,
     batch_size: int = 64,
     learning_rate: float = 1e-3,
-) -> TemporalFusionTransformer:
+    return_trainer: bool = False,
+):
     train_loader = dataset.to_dataloader(train=True, batch_size=batch_size, num_workers=4)
 
     tft = TemporalFusionTransformer.from_dataset(
@@ -91,6 +92,8 @@ def train_tft(
         enable_progress_bar=True,
     )
     trainer.fit(tft, train_dataloaders=train_loader)
+    if return_trainer:
+        return tft, trainer
     return tft
 
 

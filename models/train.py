@@ -12,6 +12,8 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+import pickle
+
 import pandas as pd
 import mlflow
 import torch
@@ -72,7 +74,7 @@ def train_ticker(
             "train_rows": len(train_df),
         })
 
-        tft = train_tft(training_dataset, max_epochs=max_epochs)
+        tft, trainer = train_tft(training_dataset, max_epochs=max_epochs, return_trainer=True)
 
         # Build validation dataset that reuses training's normalization/encoders
         from pytorch_forecasting import TimeSeriesDataSet
@@ -110,10 +112,21 @@ def train_ticker(
         print(f"[train] {ticker} baseline metrics: {baseline}")
 
         CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
-        ckpt_path = CHECKPOINT_DIR / f"{ticker.replace('.', '_')}_tft.ckpt"
-        torch.save(tft.state_dict(), ckpt_path)
-        mlflow.log_artifact(str(ckpt_path))
-        print(f"[train] Saved checkpoint → {ckpt_path}")
+        safe_ticker = ticker.replace(".", "_")
+
+        # Lightning checkpoint (hparams + weights) — reload via TemporalFusionTransformer.load_from_checkpoint
+        model_path = CHECKPOINT_DIR / f"{safe_ticker}_tft.ckpt"
+        trainer.save_checkpoint(model_path)
+
+        # Dataset parameters (encoders/scalers) — required to preprocess new inputs at inference time
+        params_path = CHECKPOINT_DIR / f"{safe_ticker}_dataset_params.pkl"
+        with open(params_path, "wb") as f:
+            pickle.dump(training_dataset.get_parameters(), f)
+
+        mlflow.log_artifact(str(model_path))
+        mlflow.log_artifact(str(params_path))
+        print(f"[train] Saved model → {model_path}")
+        print(f"[train] Saved dataset params → {params_path}")
 
     return tft, metrics
 
