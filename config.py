@@ -24,6 +24,7 @@ PROCESSED_FEATURES_DIR: Path = DATA_DIR / "processed" / "features"
 PROCESSED_SENTIMENTS_DIR: Path = DATA_DIR / "processed" / "sentiments"
 META_DIR: Path = DATA_DIR / "meta"
 ARTICLES_META_FILE: Path = META_DIR / "articles_meta.json"
+ALERTS_LOG_FILE: Path = META_DIR / "alerts.json"
 
 MLFLOW_TRACKING_URI: str = os.getenv("MLFLOW_TRACKING_URI", "sqlite:///mlflow.db")
 
@@ -42,6 +43,21 @@ GDELT_QUERIES: dict[str, str] = {
     "NVDA":  '"NVIDIA" OR "NVDA" stock',
     "SAP.DE": '"SAP" software stock',
 }
+
+# Alert thresholds — tune these as you see false positives/negatives in practice
+ALERT_SENTIMENT_ZSCORE: float = 2.0       # sentiment_mean move vs its own rolling mean/std
+ALERT_VOLUME_ZSCORE: float = 3.0          # volume vs rolling mean/std
+ALERT_PRICE_MOVE_PCT: float = 3.0         # daily |return| in percent
+ALERT_EARNINGS_SURPRISE_PCT: float = 5.0  # |EPS surprise| in percent
+ALERT_ROLLING_WINDOW_DAYS: int = 30       # window used to compute rolling mean/std baselines
+ALERT_POLL_INTERVAL_MINUTES: int = 30
+
+# NewsAPI free tier caps at 100 requests/day total (shared across all tickers).
+# A separate, slower cooldown than the 30-min RSS/price poll keeps well under that:
+# 4 tickers x 1 request every 90 min = ~64 requests/day.
+NEWSAPI_POLL_INTERVAL_MINUTES: int = 90
+NEWSAPI_LOOKBACK_DAYS: int = 3
+NEWSAPI_LAST_FETCH_FILE: Path = META_DIR / "newsapi_last_fetch.json"
 
 # RSS feeds per ticker (extend as needed)
 RSS_FEEDS: dict[str, list[str]] = {

@@ -14,11 +14,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import pandas as pd
 import torch
 import mlflow
-from pytorch_forecasting import TimeSeriesDataSet
 
 from config import PROCESSED_FEATURES_DIR, MLFLOW_TRACKING_URI, DEFAULT_TICKERS
-from models.tft_model import create_tft_dataset, train_tft
-from models.evaluate import compute_metrics, naive_baseline_metrics
+from models.tft_model import create_train_val_datasets, train_tft
+from models.evaluate import compute_metrics, naive_baseline_metrics, predict_window
 
 USE_GPU = torch.cuda.is_available()
 
@@ -30,7 +29,8 @@ def walk_forward_evaluate(
     test_months: int = 3,
     max_encoder_length: int = 60,
     max_prediction_length: int = 5,
-    max_epochs: int = 15,
+    max_epochs: int = 50,
+    val_days: int = 60,
 ) -> pd.DataFrame:
     """
     Rolls a training window forward in time. Returns a DataFrame of
@@ -69,34 +69,14 @@ def walk_forward_evaluate(
         print(f"[walkforward] {ticker} window {window_num}: "
               f"train<{current.date()} test=[{current.date()},{test_end.date()})")
 
-        training_dataset = create_tft_dataset(
+        training_dataset, validation_dataset = create_train_val_datasets(
             train_df.drop(columns=["time_idx", "ticker"]),
-            ticker, max_encoder_length, max_prediction_length,
+            ticker, max_encoder_length, max_prediction_length, val_days=val_days,
         )
-        tft = train_tft(training_dataset, max_epochs=max_epochs)
+        tft = train_tft(training_dataset, validation_dataset=validation_dataset, max_epochs=max_epochs)
 
-        pred_dataset = TimeSeriesDataSet.from_dataset(
-            training_dataset, context_df, predict=False, stop_randomization=True,
-            min_prediction_idx=train_idx_end,
-        )
-        loader = pred_dataset.to_dataloader(train=False, batch_size=64, num_workers=0)
-
-        result = tft.predict(
-            loader, mode="prediction", return_index=True,
-            trainer_kwargs={"accelerator": "gpu" if USE_GPU else "cpu", "devices": 1},
-        )
-
-        preds_1step = result.output[:, 0].cpu().numpy()
-        time_idxs = result.index["time_idx"].values
-        window_dates = [dates[i] for i in time_idxs]
-        actuals = df.set_index("time_idx").loc[time_idxs, "return_1d"].values
-
-        window_df = pd.DataFrame({
-            "date": window_dates,
-            "return_1d": actuals,
-            "predicted": preds_1step,
-        })
-        all_results.append(window_df)
+        window_df = predict_window(tft, training_dataset, context_df, train_idx_end, dates)
+        all_results.append(window_df.reset_index())
 
         current += pd.DateOffset(months=test_months)
 
@@ -111,14 +91,17 @@ def run_ticker(
     ticker: str,
     train_months: int = 18,
     test_months: int = 3,
-    max_epochs: int = 15,
+    max_epochs: int = 50,
+    val_days: int = 60,
 ) -> dict:
     path = PROCESSED_FEATURES_DIR / f"{ticker.replace('.', '_')}_features.parquet"
     if not path.exists():
         raise FileNotFoundError(f"No feature matrix for {ticker} — run features/builder.py first")
 
     df = pd.read_parquet(path)
-    results = walk_forward_evaluate(df, ticker, train_months, test_months, max_epochs=max_epochs)
+    results = walk_forward_evaluate(
+        df, ticker, train_months, test_months, max_epochs=max_epochs, val_days=val_days,
+    )
 
     metrics = compute_metrics(results)
     baseline = naive_baseline_metrics(results)
@@ -131,6 +114,7 @@ def run_ticker(
             "train_months": train_months,
             "test_months": test_months,
             "max_epochs": max_epochs,
+            "val_days": val_days,
             "test_rows": len(results),
         })
         mlflow.log_metrics(metrics)
@@ -141,7 +125,7 @@ def run_ticker(
     return {"ticker": ticker, "metrics": metrics, "baseline": baseline}
 
 
-def run_all(tickers: list[str], max_epochs: int = 15) -> list[dict]:
+def run_all(tickers: list[str], max_epochs: int = 50) -> list[dict]:
     results = []
     for ticker in tickers:
         try:
@@ -156,7 +140,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--ticker", default=None, help="single ticker, or omit for all DEFAULT_TICKERS")
-    parser.add_argument("--epochs", type=int, default=15)
+    parser.add_argument("--epochs", type=int, default=50)
     args = parser.parse_args()
 
     if args.ticker:

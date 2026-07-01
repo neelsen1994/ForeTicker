@@ -13,7 +13,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-from config import PROCESSED_FEATURES_DIR, DEFAULT_TICKERS
+from config import PROCESSED_FEATURES_DIR, DEFAULT_TICKERS, ALERTS_LOG_FILE
 from features.fundamentals import fetch_fundamentals
 
 st.set_page_config(page_title="ForeTicker", layout="wide", page_icon="📈")
@@ -39,6 +39,18 @@ def load_features(ticker: str) -> pd.DataFrame:
     df = pd.read_parquet(path)
     df.index = pd.to_datetime(df.index)
     return df.sort_index()
+
+
+@st.cache_data(ttl=120)
+def load_alerts() -> pd.DataFrame:
+    import json
+    if not ALERTS_LOG_FILE.exists():
+        return pd.DataFrame(columns=["ticker", "rule", "severity", "message", "date", "fired_at"])
+    with open(ALERTS_LOG_FILE, encoding="utf-8") as f:
+        alerts = json.load(f)
+    if not alerts:
+        return pd.DataFrame(columns=["ticker", "rule", "severity", "message", "date", "fired_at"])
+    return pd.DataFrame(alerts).sort_values("fired_at", ascending=False)
 
 
 @st.cache_data(ttl=3600)
@@ -70,6 +82,17 @@ def load_backtest_metrics(ticker: str) -> dict | None:
         return runs[0].data.metrics
     except Exception:
         return None
+
+
+@st.cache_data(ttl=1800)
+def load_forecast(ticker: str, days: int) -> tuple[pd.DataFrame | None, str | None]:
+    try:
+        from models.predict import predict_next
+        return predict_next(ticker, n_days=days), None
+    except FileNotFoundError as e:
+        return None, str(e)
+    except Exception as e:
+        return None, f"Prediction failed: {e}"
 
 
 # ---------------------------------------------------------------------------
@@ -124,17 +147,52 @@ show_ema = st.sidebar.checkbox("EMA 20 / 50", value=True)
 show_bbands = st.sidebar.checkbox("Bollinger Bands", value=True)
 
 st.sidebar.subheader("Panels")
+show_forecast = st.sidebar.checkbox("TFT Forecast", value=True)
 show_rsi_macd = st.sidebar.checkbox("RSI / MACD", value=True)
 show_sentiment = st.sidebar.checkbox("Sentiment", value=True)
 show_backtest = st.sidebar.checkbox("Backtest performance", value=True)
 
-with st.sidebar.expander("🔔 Real-time alerts"):
-    st.caption(
-        "Coming soon: a background watcher will monitor live news and "
-        "fundamentals for each ticker and push an alert (sentiment spike, "
-        "earnings surprise, sudden volume/price move) the moment it's "
-        "detected — instead of finding out after the move already happened."
+if show_forecast:
+    forecast_days = st.sidebar.slider("Forecast horizon (days)", 1, 5, 5)
+
+alerts_df = load_alerts()
+with st.sidebar.expander("🔔 Alerts", expanded=True):
+    if alerts_df.empty:
+        st.caption(
+            "No alerts yet. Run `python -m alerts.watcher --backfill` to scan "
+            "recent history, or `python -m alerts.watcher` to poll continuously."
+        )
+    else:
+        recent_cutoff = pd.Timestamp.now(tz="UTC") - pd.Timedelta(days=7)
+        recent = alerts_df[pd.to_datetime(alerts_df["fired_at"], utc=True) >= recent_cutoff]
+        st.metric("Last 7 days", len(recent), f"{(recent['severity'] == 'high').sum()} high severity")
+        st.caption(
+            "Sentiment/event-based, not the TFT model — see the Backtest panel "
+            "for why. Refresh via `python -m alerts.watcher`."
+        )
+
+
+# ---------------------------------------------------------------------------
+# Alerts feed (top of page — the most time-sensitive information)
+# ---------------------------------------------------------------------------
+
+st.subheader("🔔 Recent Alerts")
+if alerts_df.empty:
+    st.caption("No alerts logged yet.")
+else:
+    display_df = alerts_df.head(15)[["fired_at", "ticker", "severity", "rule", "message"]].copy()
+    display_df["fired_at"] = pd.to_datetime(display_df["fired_at"]).dt.strftime("%Y-%m-%d %H:%M UTC")
+
+    def _highlight_severity(row):
+        color = "background-color: #ffe0e0" if row["severity"] == "high" else "background-color: #fff4e0"
+        return [color] * len(row)
+
+    st.dataframe(
+        display_df.style.apply(_highlight_severity, axis=1),
+        width='stretch', hide_index=True,
     )
+
+st.divider()
 
 
 # ---------------------------------------------------------------------------
@@ -200,6 +258,45 @@ fig.add_trace(go.Bar(x=df.index, y=df["Volume"], name="Volume", marker_color="rg
 
 fig.update_layout(height=550, xaxis_rangeslider_visible=False, margin=dict(t=20, b=20))
 st.plotly_chart(fig, width='stretch')
+
+
+# ---------------------------------------------------------------------------
+# TFT Forecast
+# ---------------------------------------------------------------------------
+
+if show_forecast:
+    st.subheader("TFT Forecast")
+    forecast, error = load_forecast(ticker, forecast_days)
+
+    if error:
+        st.caption(f"No forecast available — {error}")
+    else:
+        fcol1, fcol2 = st.columns([2, 1])
+
+        with fcol1:
+            fc_fig = go.Figure()
+            fc_fig.add_trace(go.Bar(
+                x=forecast.index.strftime("%Y-%m-%d"),
+                y=forecast["predicted_return_1d"] * 100,
+                marker_color=["seagreen" if v > 0 else "indianred" for v in forecast["predicted_return_1d"]],
+                name="Predicted return",
+            ))
+            fc_fig.add_hline(y=0, line_dash="dash", line_color="gray")
+            fc_fig.update_layout(
+                title=f"Predicted daily return — next {len(forecast)} trading day(s)",
+                yaxis_title="Predicted return (%)", height=300, margin=dict(t=40, b=20),
+            )
+            st.plotly_chart(fc_fig, width='stretch')
+
+        with fcol2:
+            cumulative = (1 + forecast["predicted_return_1d"]).cumprod().iloc[-1] - 1
+            direction = "📈 Bullish" if forecast["predicted_return_1d"].mean() > 0 else "📉 Bearish"
+            st.metric("Outlook", direction)
+            st.metric(f"Cumulative predicted return ({len(forecast)}d)", fmt_pct(cumulative))
+            st.caption(
+                "Forecast from the walk-forward-validated TFT model. "
+                "Backtest accuracy below is the honest measure of how much to trust this."
+            )
 
 
 # ---------------------------------------------------------------------------
